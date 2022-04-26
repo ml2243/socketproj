@@ -8,6 +8,11 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <fcntl.h>	//open
+
+#include "msg.h"
+
+#define MAX_ID_DIGITS 10
 
 void Usage(char *progname);
 void PrintOut(int fd, struct sockaddr *addr, size_t addrlen);
@@ -19,43 +24,50 @@ void HandleClient(int c_fd, struct sockaddr *addr, size_t addrlen,
 
 int 
 main(int argc, char **argv) {
-  // Expect the port number as a command line argument.
-  if (argc != 2) {
-    Usage(argv[0]);
-  }
+	// Expect the port number as a command line argument.
+	if (argc != 2) {
+		Usage(argv[0]);
+	}
+	
+	int sock_family;
+	int listen_fd = Listen(argv[1], &sock_family);
+	if (listen_fd <= 0) {
+		// We failed to bind/listen to a socket.  Quit with failure.
+		printf("Couldn't bind to any addresses.\n");
+		return EXIT_FAILURE;
+	}
+	
+	//create and open a new file called "database"
+	int32_t db_fd = open("database", O_RDWR|O_CREAT, S_IRUSR|S_IWUSR);
+	if (db_fd == -1){
+		perror("open failed");
+		exit(EXIT_FAILURE);
+	}
 
-  int sock_family;
-  int listen_fd = Listen(argv[1], &sock_family);
-  if (listen_fd <= 0) {
-    // We failed to bind/listen to a socket.  Quit with failure.
-    printf("Couldn't bind to any addresses.\n");
-    return EXIT_FAILURE;
-  }
-
-  // Loop forever, accepting a connection from a client and doing
-  // an echo trick to it.
-  while (1) {
-    struct sockaddr_storage caddr;
-    socklen_t caddr_len = sizeof(caddr);
-    int client_fd = accept(listen_fd,
-                           (struct sockaddr *)(&caddr),
-                           &caddr_len);
-    if (client_fd < 0) {
-      if ((errno == EINTR) || (errno == EAGAIN) || (errno == EWOULDBLOCK))
-        continue;
-      printf("Failure on accept:%s \n ", strerror(errno));
-      break;
-    }
-
-    HandleClient(client_fd,
-                 (struct sockaddr *)(&caddr),
-                 caddr_len,
-                 sock_family);
-  }
-
-  // Close socket
-  close(listen_fd);
-  return EXIT_SUCCESS;
+	// Loop forever, accepting a connection from a client and doing
+	// an echo trick to it.
+	while (1) {
+		struct sockaddr_storage caddr;
+		socklen_t caddr_len = sizeof(caddr);
+		int client_fd = accept(listen_fd,
+		                       (struct sockaddr *)(&caddr),
+		                       &caddr_len);
+		if (client_fd < 0) {
+			if ((errno == EINTR) || (errno == EAGAIN) || (errno == EWOULDBLOCK))
+				continue;
+			printf("Failure on accept:%s \n ", strerror(errno));
+			break;
+		}
+		
+		HandleClient(client_fd,
+		             (struct sockaddr *)(&caddr),
+		             caddr_len,
+		             sock_family);
+	}
+	
+	// Close socket
+	close(listen_fd);
+	return EXIT_SUCCESS;
 }
 
 void Usage(char *progname) {
@@ -225,37 +237,92 @@ Listen(char *portnum, int *sock_family) {
 void 
 HandleClient(int c_fd, struct sockaddr *addr, size_t addrlen,
                   int sock_family) {
-  // Print out information about the client.
-  printf("\nNew client connection \n" );
-  PrintOut(c_fd, addr, addrlen);
-  PrintReverseDNS(addr, addrlen);
-  PrintServerSide(c_fd, sock_family);
+	// Print out information about the client.
+	printf("\nNew client connection \n" );
+	PrintOut(c_fd, addr, addrlen);
+	PrintReverseDNS(addr, addrlen);
+	PrintServerSide(c_fd, sock_family);
+	
+	// Loop, reading data and echo'ing it back, until the client
+	// closes the connection.
+	while (1) {
+		//message format = m_len = "msg.type" + "name + \0" + "id" + '\0'
+		int32_t m_len = 1 + MAX_NAME_LENGTH + MAX_ID_DIGITS + 1;
+		char* message = (char*) malloc(m_len * sizeof(char));
+	
+		ssize_t res = read(c_fd, message, m_len);
+	
+		
+		if (res == 0) {
+			printf("[The client disconnected.] \n");
+			break;
+		}
+	
+		else if (res == -1) {
+			if ((errno == EAGAIN) || (errno == EINTR))
+				continue;
+	
+			printf(" Error on client socket:%s \n ", strerror(errno));
+			break;
+		}
 
-  // Loop, reading data and echo'ing it back, until the client
-  // closes the connection.
-  while (1) {
-    char clientbuf[1024];
-    ssize_t res = read(c_fd, clientbuf, 1023);
-    if (res == 0) {
-      printf("[The client disconnected.] \n");
-      break;
-    }
+		
+		char type = *message;
+	
+		if (atoi(&type) == PUT){
+			if (put(message + 1) == -1){	//remove type from message
+				char* m = "Put was unsuccessful. Please try again.";
+				write(c_fd, m, strlen(m));
+				continue;
+			}
+			write(c_fd, "Put success.", strlen("Put success."));
+		}
 
-    if (res == -1) {
-      if ((errno == EAGAIN) || (errno == EINTR))
-        continue;
+		//name_len = "name" + '\0'
+		int32_t name_len = strlen(message) - 1 + 1;	//-1 to remove type, +1 to add null byte
+		char* name = (char*) malloc( (name_len * sizeof(char)));
 
-	  printf(" Error on client socket:%s \n ", strerror(errno));
-      break;
-    }
-    clientbuf[res] = '\0';
-    printf("the client sent: %s \n", clientbuf);
+		strcpy(name, message + 1);
 
-    // Really should do this in a loop in case of EAGAIN, EINTR,
-    // or short write, but I'm lazy.  Don't be like me. ;)
-    write(c_fd, "You typed: ", strlen("You typed: "));
-    write(c_fd, clientbuf, strlen(clientbuf));
-  }
+		char* str_id = (char*) malloc((MAX_ID_DIGITS + 1) * sizeof(char));	//+1 to add null byte
+		strcpy(str_id, message + 1 + name_len);
 
-  close(c_fd);
+		printf("type: %c \n", type);
+		printf("name: %s \n", name);
+		printf("id: %s \n", str_id);
+
+
+//		write(c_fd, "type: ", strlen("type: "));
+//		write(c_fd, &type, 1);
+		
+//		write(c_fd, "\ntype+name: ", strlen("\ntype+name: "));
+//		write(c_fd, message, strlen(message));
+		
+//		write(c_fd, "\nname from message: ", strlen("\nname: "));
+//		write(c_fd, message + 1, strlen(message + 1));
+		
+//		write(c_fd, "\nname: ", strlen("\nname: "));
+//		write(c_fd, name, strlen(name));
+		
+//		write(c_fd, "id: ", strlen("id: "));
+//		write(c_fd, str_id, strlen(str_id));
+
+		// Really should do this in a loop in case of EAGAIN, EINTR,
+		// or short write, but I'm lazy.  Don't be like me. ;)
+		//write(c_fd, "You typed: ", strlen("You typed: "));
+		//write(c_fd, clientbuf, strlen(clientbuf));
+	}
+
+	close(c_fd);
+}
+
+//return 0 if put was successful
+int put(char* message){
+//	int32_t name_len = strlen(message) + 1;	//add null byte
+//	char* name = (char*) malloc( (name_len * sizeof(char)));
+
+
+
+
+	return 0;
 }

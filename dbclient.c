@@ -9,7 +9,10 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 
+#include "msg.h"
+
 #define BUF 256
+#define MAX_ID_DIGITS 10	//record id uint32_t can have up to 10 digits
 
 void Usage(char *progname);
 
@@ -21,6 +24,8 @@ int LookupName(char *name,
 int Connect(const struct sockaddr_storage *addr,
              const size_t addrlen,
              int *ret_fd);
+
+void put(int32_t socket_fd);
 
 int 
 main(int argc, char **argv) {
@@ -48,8 +53,8 @@ main(int argc, char **argv) {
 
   // Read something from the remote host.
   // Will only read BUF-1 characters at most.
-    char readbuf[BUF] = {'h', 'i', 'm', '\0'};
-    int res = 4;
+ //   char readbuf[BUF] = {'h', 'i', 'm', '\0'};
+ //   int res = 4;
 //  while (1) {
 //    res = read(socket_fd, readbuf, BUF-1);
 //    if (res == 0) {
@@ -70,42 +75,122 @@ main(int argc, char **argv) {
 //  }
 
   // Write something to the remote host.
-  while (1) {
-    int wres = write(socket_fd, readbuf, res);
-    if (wres == 0) {
-     printf("socket closed prematurely \n");
-      close(socket_fd);
-      return EXIT_FAILURE;
-    }
-    if (wres == -1) {
-      if (errno == EINTR)
-        continue;
-      printf("socket write failure \n");
-      close(socket_fd);
-      return EXIT_FAILURE;
-    }
-//    res = read(socket_fd, readbuf, BUF-1);
-//    if (res == 0) {
-//      printf("socket closed prematurely \n");
-//      close(socket_fd);
-//      return EXIT_FAILURE;
-//    }
-//    if (res == -1) {
-//      if (errno == EINTR)
-//        continue;
-//      printf("socket read failure \n");
-//      close(socket_fd);
-//      return EXIT_FAILURE;
-//    }
-//    readbuf[res] = '\0';
-//    printf("%s", readbuf);
-    break;
-  }
+//  while (1) {
+   // int wres = write(socket_fd, readbuf, res);
+   // if (wres == 0) {
+   //  printf("socket closed prematurely \n");
+   //   close(socket_fd);
+   //   return EXIT_FAILURE;
+   // }
+   // if (wres == -1) {
+   //   if (errno == EINTR)
+   //     continue;
+   //   printf("socket write failure \n");
+   //   close(socket_fd);
+   //   return EXIT_FAILURE;
+   // }
+
+   // res = read(socket_fd, readbuf, BUF-1);
+   // if (res == 0) {
+   //   printf("socket closed prematurely \n");
+   //   close(socket_fd);
+   //   return EXIT_FAILURE;
+   // }
+   // if (res == -1) {
+   //   if (errno == EINTR)
+   //     continue;
+   //   printf("socket read failure \n");
+   //   close(socket_fd);
+   //   return EXIT_FAILURE;
+   // }
+   // readbuf[res] = '\0';
+   // printf("%s\n", readbuf);
+   // break;
+//  }
+
+	while(1){
+		put(socket_fd);
+	}
 
   // Clean up.
   close(socket_fd);
   return EXIT_SUCCESS;
 }
+
+void put(int32_t socket_fd){
+
+	//user_input = "msg.type" + "name + \0" + "id" + '\n' +'\0'
+	char* user_input = (char*) malloc( (1 + MAX_NAME_LENGTH + MAX_ID_DIGITS + 2) * sizeof(char));
+	*user_input = '1';
+
+	printf("Enter the name: ");
+
+	fgets(user_input + 1, MAX_NAME_LENGTH, stdin);
+	
+	user_input[strlen(user_input) - 1] = '\0';	//replace '\n' with '\0'
+	int32_t ui_len = strlen(user_input) + 1; 	//add null byte
+
+	printf("Enter the id: ");
+
+	char* id_user_input = user_input + ui_len;
+	
+	fgets(id_user_input, MAX_ID_DIGITS + 2, stdin);
+	id_user_input[strlen(id_user_input) - 1] = '\0';	//replace '\n' with '\0'
+	
+	//now id_user_input = "id" + '\0' + '\0'
+	ui_len += strlen(id_user_input) + 1;	//+1 for 1 null byte
+
+	//now ui_len = "msg.type" + "name + \0" + "id" + '\0'
+
+//	printf("user input = = %s \n", user_input);
+//	printf("id = %s \n", user_input + strlen(user_input) + 1);
+//	printf("len of ui = %d \n", ui_len);
+
+	while(1){
+		int wres = write(socket_fd, user_input, ui_len);
+
+		if (wres == 0) {
+   			printf("socket closed prematurely \n");
+   			close(socket_fd);
+   			exit(EXIT_FAILURE);
+   		}
+   		else if (wres == -1) {
+   			if (errno == EINTR)
+   		     		continue;
+   		   	
+			printf("socket write failure \n");
+   		   	close(socket_fd);
+   		   	exit(EXIT_FAILURE);
+   		}
+		else if (wres != ui_len){
+			printf("Incomplete write. Attempting write again.");
+			continue;
+		}
+   
+
+		char readbuf[BUF];
+    		int res = read(socket_fd, readbuf, BUF-1);
+    		if (res == 0) {
+    			printf("socket closed prematurely \n");
+    			close(socket_fd);
+    			exit(EXIT_FAILURE);
+    		}
+    		if (res == -1) {
+    			if (errno == EINTR)
+    				continue;
+    			printf("socket read failure \n");
+    			close(socket_fd);
+    			exit(EXIT_FAILURE);
+    		}
+    		readbuf[BUF - 1] = '\0';
+    		printf("%s\n", readbuf);
+
+		break;
+	}
+	return;
+}
+
+
 
 void 
 Usage(char *progname) {
