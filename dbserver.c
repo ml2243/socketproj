@@ -7,7 +7,7 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/types.h>
-#include <unistd.h>
+#include <unistd.h>	//lockf
 #include <fcntl.h>	//open
 
 #include "msg.h"
@@ -397,16 +397,22 @@ int put(int32_t db_fd, struct record rd){
 	off_t eof = lseek(db_fd, 0, SEEK_END);	//eof is at end of file
 	
 	if (eof == 0){	//a brand new file
-		if (write(db_fd, &rd, sizeof rd) != sizeof rd)
-			return -1;
-		return 0;
+		if (lockf(db_fd, F_TLOCK, sizeof rd) != -1) {
+			if (write(db_fd, &rd, sizeof rd) != sizeof rd){
+				lockf(db_fd, F_ULOCK, sizeof rd);
+				return -1;
+			}
+			lockf(db_fd, F_ULOCK, sizeof rd);
+			return 0;
+		}
 	}
 
 	//...file has data in it...
 
 	//traverse through file
 	//i = current offset
-	for (off_t i = 0; i < eof; i += sizeof temp){
+	off_t i;
+	for (i = 0; i < eof; i += sizeof temp){
 
 		//adjust file offset to current offset
 		if (lseek(db_fd, i, SEEK_SET) == -1)
@@ -422,21 +428,35 @@ int put(int32_t db_fd, struct record rd){
 			if (lseek(db_fd, i, SEEK_SET) == -1)
 				return -1;
 			
-			if (write(db_fd, &rd, sizeof rd) != sizeof rd)
-				return -1;
-			return 0;
+			if (lockf(db_fd, F_TLOCK, sizeof rd) != -1) {
+				if (write(db_fd, &rd, sizeof rd) != sizeof rd){
+					lockf(db_fd, F_ULOCK, sizeof rd);
+					return -1;
+				}
+				lockf(db_fd, F_ULOCK, sizeof rd);
+				return 0;
+			}
 		}
 	
 	}
 
 	//...no hole in file. Currently at end of file...
-	
-	//write to end of file
-	if (write(db_fd, &rd, sizeof rd) != sizeof rd)
-		return -1;
 
-//	lseek(db_fd, 0, SEEK_END);	//move file offset to end of file
-//	if (write(db_fd, &rd, sizeof rd) != sizeof rd)
-//		return -1;
-	return 0;
+	while(1){
+		if (lockf(db_fd, F_TLOCK, sizeof rd) != -1) {
+			//write to end of file
+			if (write(db_fd, &rd, sizeof rd) != sizeof rd){
+				lockf(db_fd, F_ULOCK, sizeof rd);
+				return -1;
+			}
+			lockf(db_fd, F_ULOCK, sizeof rd);
+			return 0;
+		}
+		//...some other thread is writing to end of file...
+
+		//adjust file offset to beyond the file 
+		i += sizeof temp;
+		if (lseek(db_fd, i, SEEK_SET) == -1)
+			return -1;
+	}
 }
