@@ -20,7 +20,11 @@ void PrintReverseDNS(struct sockaddr *addr, size_t addrlen);
 void PrintServerSide(int client_fd, int sock_family);
 int  Listen(char *portnum, int *sock_family);
 void HandleClient(int c_fd, struct sockaddr *addr, size_t addrlen,
-                  int sock_family);
+                  int sock_family, int32_t db_fd);
+
+int put(int32_t db_fd, struct record rd);
+int get(int32_t db_fd, struct record *rd_ptr);
+int del(int32_t db_fd, struct record *rd_ptr);
 
 int 
 main(int argc, char **argv) {
@@ -62,7 +66,7 @@ main(int argc, char **argv) {
 		HandleClient(client_fd,
 		             (struct sockaddr *)(&caddr),
 		             caddr_len,
-		             sock_family);
+		             sock_family, db_fd);
 	}
 	
 	// Close socket
@@ -236,7 +240,7 @@ Listen(char *portnum, int *sock_family) {
 
 void 
 HandleClient(int c_fd, struct sockaddr *addr, size_t addrlen,
-                  int sock_family) {
+                  int sock_family, int32_t db_fd) {
 	// Print out information about the client.
 	printf("\nNew client connection \n" );
 	PrintOut(c_fd, addr, addrlen);
@@ -246,12 +250,10 @@ HandleClient(int c_fd, struct sockaddr *addr, size_t addrlen,
 	// Loop, reading data and echo'ing it back, until the client
 	// closes the connection.
 	while (1) {
-		//message format = m_len = "msg.type" + "name + \0" + "id" + '\0'
-		int32_t m_len = 1 + MAX_NAME_LENGTH + MAX_ID_DIGITS + 1;
-		char* message = (char*) malloc(m_len * sizeof(char));
-	
-		ssize_t res = read(c_fd, message, m_len);
-	
+		struct msg m;
+		
+		//read from client
+		ssize_t res = read(c_fd, &m, sizeof m);
 		
 		if (res == 0) {
 			printf("[The client disconnected.] \n");
@@ -266,63 +268,175 @@ HandleClient(int c_fd, struct sockaddr *addr, size_t addrlen,
 			break;
 		}
 
-		
-		char type = *message;
-	
-		if (atoi(&type) == PUT){
-			if (put(message + 1) == -1){	//remove type from message
-				char* m = "Put was unsuccessful. Please try again.";
-				write(c_fd, m, strlen(m));
-				continue;
-			}
-			write(c_fd, "Put success.", strlen("Put success."));
+		if (m.type == PUT){
+			if (put(db_fd, m.rd) == -1)
+				m.type = FAIL;
+			else
+				m.type = SUCCESS;
 		}
 
-		//name_len = "name" + '\0'
-		int32_t name_len = strlen(message) - 1 + 1;	//-1 to remove type, +1 to add null byte
-		char* name = (char*) malloc( (name_len * sizeof(char)));
+		else if (m.type == GET){
+			int get_result = get(db_fd, &(m.rd));	
+			if (get_result == 1)
+				m.type = SUCCESS;
+			else
+				m.type = FAIL;
+		}
 
-		strcpy(name, message + 1);
+		else if (m.type == DEL){
+			if (del(db_fd, &(m.rd)) == -1)
+				m.type = FAIL;
+			else
+				m.type = SUCCESS;
+		}
 
-		char* str_id = (char*) malloc((MAX_ID_DIGITS + 1) * sizeof(char));	//+1 to add null byte
-		strcpy(str_id, message + 1 + name_len);
+		//write to client
+		while(1) {
+			ssize_t wres = write(c_fd, &m, sizeof m);
 
-		printf("type: %c \n", type);
-		printf("name: %s \n", name);
-		printf("id: %s \n", str_id);
+			if (wres == 0){
+				printf("socket closed prematurely \n");
+				close(c_fd);
+				return;
+			}
+			else if (wres == -1){
+				if (errno == EINTR)
+					continue;
 
-
-//		write(c_fd, "type: ", strlen("type: "));
-//		write(c_fd, &type, 1);
-		
-//		write(c_fd, "\ntype+name: ", strlen("\ntype+name: "));
-//		write(c_fd, message, strlen(message));
-		
-//		write(c_fd, "\nname from message: ", strlen("\nname: "));
-//		write(c_fd, message + 1, strlen(message + 1));
-		
-//		write(c_fd, "\nname: ", strlen("\nname: "));
-//		write(c_fd, name, strlen(name));
-		
-//		write(c_fd, "id: ", strlen("id: "));
-//		write(c_fd, str_id, strlen(str_id));
-
-		// Really should do this in a loop in case of EAGAIN, EINTR,
-		// or short write, but I'm lazy.  Don't be like me. ;)
-		//write(c_fd, "You typed: ", strlen("You typed: "));
-		//write(c_fd, clientbuf, strlen(clientbuf));
+				printf("socket write failure \n");
+				close(c_fd);
+				return;
+			}
+			break;
+		}
 	}
 
 	close(c_fd);
 }
 
-//return 0 if put was successful
-int put(char* message){
-//	int32_t name_len = strlen(message) + 1;	//add null byte
-//	char* name = (char*) malloc( (name_len * sizeof(char)));
+//delete a record from file
+//return 0 if del was successful
+//return -1 if del was unsuccessful
+int del(int32_t db_fd, struct record *rd_ptr){
+	char buf[sizeof *rd_ptr] = {0};	//array the size of record with '\0' bytes
 
+	off_t eof = lseek(db_fd, 0, SEEK_END);	//offset at end of file 
+	struct record temp;
 
+	//traverse through the file
+	//i = current offset
+	for (off_t i = 0; i < eof; i += sizeof temp){
+	
+		//adjust file offset
+		if (lseek(db_fd, i, SEEK_SET) == -1){
+			return -1;
+		}
+		
+		ssize_t res = read(db_fd, &temp, sizeof temp);
 
+		if (res == 0)
+			continue;
+	
+		else if (res == -1)
+			return -1;
 
+		if(temp.id == rd_ptr -> id){
+			if (lseek(db_fd, i, SEEK_SET) == -1){
+				return -1;
+			}
+			if (write(db_fd, buf, sizeof buf) != sizeof buf){
+				printf("Server could not delete record");
+				return -1;
+			}
+			strcpy(rd_ptr -> name, temp.name);
+			return 0;
+		}
+	} 
+
+	return -1;
+}
+
+//get record from database
+//return 0 if get was successful but none matched
+//return 1 if get was successful and one matched
+//return -1 if get failed
+int get(int32_t db_fd, struct record *rd_ptr){
+	off_t eof = lseek(db_fd, 0, SEEK_END);	//offset at end of file 
+	struct record temp;
+
+	//traverse through the file
+	//i = current offset
+	for (off_t i = 0; i < eof; i += sizeof temp){
+	
+		//adjust file offset
+		if (lseek(db_fd, i, SEEK_SET) == -1){
+			return -1;
+		}
+		
+		ssize_t res = read(db_fd, &temp, sizeof temp);
+
+		if (res == 0)
+			continue;
+	
+		else if (res == -1)
+			return -1;
+
+		if(temp.id == rd_ptr -> id){
+			strcpy(rd_ptr -> name, temp.name);
+			return 1;
+		}
+	} 
+
+	return 0;
+}
+
+//write to database
+//return 0 if put was successful and -1 if error
+int put(int32_t db_fd, struct record rd){
+	struct record temp;
+	off_t eof = lseek(db_fd, 0, SEEK_END);	//eof is at end of file
+	
+	if (eof == 0){	//a brand new file
+		if (write(db_fd, &rd, sizeof rd) != sizeof rd)
+			return -1;
+		return 0;
+	}
+
+	//...file has data in it...
+
+	//traverse through file
+	//i = current offset
+	for (off_t i = 0; i < eof; i += sizeof temp){
+
+		//adjust file offset to current offset
+		if (lseek(db_fd, i, SEEK_SET) == -1)
+			return -1;
+		
+		//read the section
+		if (read(db_fd, &temp, sizeof temp) == -1)
+			return -1;
+	
+		//a hole in file
+		if (strlen(temp.name) == 0){
+			//adjust file offset to before read
+			if (lseek(db_fd, i, SEEK_SET) == -1)
+				return -1;
+			
+			if (write(db_fd, &rd, sizeof rd) != sizeof rd)
+				return -1;
+			return 0;
+		}
+	
+	}
+
+	//...no hole in file. Currently at end of file...
+	
+	//write to end of file
+	if (write(db_fd, &rd, sizeof rd) != sizeof rd)
+		return -1;
+
+//	lseek(db_fd, 0, SEEK_END);	//move file offset to end of file
+//	if (write(db_fd, &rd, sizeof rd) != sizeof rd)
+//		return -1;
 	return 0;
 }

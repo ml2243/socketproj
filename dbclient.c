@@ -9,6 +9,8 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 
+#include <inttypes.h>	//SCNd8
+
 #include "msg.h"
 
 #define BUF 256
@@ -26,6 +28,8 @@ int Connect(const struct sockaddr_storage *addr,
              int *ret_fd);
 
 void put(int32_t socket_fd);
+void get(int32_t socket_fd);
+void del(int32_t socket_fd);
 
 int 
 main(int argc, char **argv) {
@@ -51,65 +55,28 @@ main(int argc, char **argv) {
     Usage(argv[0]);
   }
 
-  // Read something from the remote host.
-  // Will only read BUF-1 characters at most.
- //   char readbuf[BUF] = {'h', 'i', 'm', '\0'};
- //   int res = 4;
-//  while (1) {
-//    res = read(socket_fd, readbuf, BUF-1);
-//    if (res == 0) {
-//      printf("socket closed prematurely \n");
-//      close(socket_fd);
-//      return EXIT_FAILURE;
-//    }
-//    if (res == -1) {
-//      if (errno == EINTR)
-//        continue;
-//      printf("socket read failure \n");
-//      close(socket_fd);
-//      return EXIT_FAILURE;
-//    }
-//    readbuf[res] = '\0';
-//    printf("%s", readbuf);
-//    break;
-//  }
-
-  // Write something to the remote host.
-//  while (1) {
-   // int wres = write(socket_fd, readbuf, res);
-   // if (wres == 0) {
-   //  printf("socket closed prematurely \n");
-   //   close(socket_fd);
-   //   return EXIT_FAILURE;
-   // }
-   // if (wres == -1) {
-   //   if (errno == EINTR)
-   //     continue;
-   //   printf("socket write failure \n");
-   //   close(socket_fd);
-   //   return EXIT_FAILURE;
-   // }
-
-   // res = read(socket_fd, readbuf, BUF-1);
-   // if (res == 0) {
-   //   printf("socket closed prematurely \n");
-   //   close(socket_fd);
-   //   return EXIT_FAILURE;
-   // }
-   // if (res == -1) {
-   //   if (errno == EINTR)
-   //     continue;
-   //   printf("socket read failure \n");
-   //   close(socket_fd);
-   //   return EXIT_FAILURE;
-   // }
-   // readbuf[res] = '\0';
-   // printf("%s\n", readbuf);
-   // break;
-//  }
+	int8_t choice;
 
 	while(1){
-		put(socket_fd);
+		printf("Enter your choice (1 to put, 2 to get, 3 to delete, 0 to quit): ");
+		scanf("%" SCNd8 "%*c", &choice);
+		
+		if (choice == PUT)
+			put(socket_fd);
+		
+		else if (choice == GET)
+			get(socket_fd);
+		
+		else if (choice == DEL)
+			del(socket_fd);
+
+		else if (choice == 0){
+			printf("Exit\n");
+			break;
+		}
+
+		else
+			printf("Invalid choice. Please try again\n");
 	}
 
   // Clean up.
@@ -117,37 +84,22 @@ main(int argc, char **argv) {
   return EXIT_SUCCESS;
 }
 
-void put(int32_t socket_fd){
-
-	//user_input = "msg.type" + "name + \0" + "id" + '\n' +'\0'
-	char* user_input = (char*) malloc( (1 + MAX_NAME_LENGTH + MAX_ID_DIGITS + 2) * sizeof(char));
-	*user_input = '1';
-
-	printf("Enter the name: ");
-
-	fgets(user_input + 1, MAX_NAME_LENGTH, stdin);
-	
-	user_input[strlen(user_input) - 1] = '\0';	//replace '\n' with '\0'
-	int32_t ui_len = strlen(user_input) + 1; 	//add null byte
+void del(int32_t socket_fd){
+	struct msg m;
+	m.type = DEL;
 
 	printf("Enter the id: ");
 
-	char* id_user_input = user_input + ui_len;
-	
-	fgets(id_user_input, MAX_ID_DIGITS + 2, stdin);
-	id_user_input[strlen(id_user_input) - 1] = '\0';	//replace '\n' with '\0'
-	
-	//now id_user_input = "id" + '\0' + '\0'
-	ui_len += strlen(id_user_input) + 1;	//+1 for 1 null byte
+	char buf[MAX_ID_DIGITS + 2];	//+2 for '\n' and '\0'
+	fgets(buf, MAX_ID_DIGITS + 2, stdin);
 
-	//now ui_len = "msg.type" + "name + \0" + "id" + '\0'
+	buf[strlen(buf) - 1] = '\0';
+	m.rd.id = atoi(buf);
 
-//	printf("user input = = %s \n", user_input);
-//	printf("id = %s \n", user_input + strlen(user_input) + 1);
-//	printf("len of ui = %d \n", ui_len);
 
+	//write to server
 	while(1){
-		int wres = write(socket_fd, user_input, ui_len);
+		ssize_t wres = write(socket_fd, &m, sizeof m);
 
 		if (wres == 0) {
    			printf("socket closed prematurely \n");
@@ -162,14 +114,16 @@ void put(int32_t socket_fd){
    		   	close(socket_fd);
    		   	exit(EXIT_FAILURE);
    		}
-		else if (wres != ui_len){
-			printf("Incomplete write. Attempting write again.");
-			continue;
+		else if (wres != sizeof m){
+			printf("Write to server failed. Please try again. \n");
+			return;
 		}
-   
+ 		break;
+	}
 
-		char readbuf[BUF];
-    		int res = read(socket_fd, readbuf, BUF-1);
+	//read from server
+	while(1){
+    		ssize_t res = read(socket_fd, &m, sizeof m);
     		if (res == 0) {
     			printf("socket closed prematurely \n");
     			close(socket_fd);
@@ -182,12 +136,165 @@ void put(int32_t socket_fd){
     			close(socket_fd);
     			exit(EXIT_FAILURE);
     		}
-    		readbuf[BUF - 1] = '\0';
-    		printf("%s\n", readbuf);
+	
+		if (m.type == SUCCESS){
+			printf("name: %s \n", m.rd.name);
+			printf("id: %u \n", m.rd.id);
+		}
+
+		else if (m.type == FAIL){
+			printf("Delete failed. Please try again \n");
+		}
+
+		else
+			printf("Delete read error. Please try again \n");
+		
+		break;
+	}
+}
+
+
+void get(int32_t socket_fd){
+	struct msg m;
+	m.type = GET;
+
+	printf("Enter the id: ");
+
+	char buf[MAX_ID_DIGITS + 2];	//+2 for '\n' and '\0'	
+	fgets(buf, MAX_ID_DIGITS + 2, stdin);
+
+	buf[strlen(buf) - 1] = '\0';
+	m.rd.id = atoi(buf);
+
+
+	//write to server
+	while(1){
+		ssize_t wres = write(socket_fd, &m, sizeof m);
+
+		if (wres == 0) {
+   			printf("socket closed prematurely \n");
+   			close(socket_fd);
+   			exit(EXIT_FAILURE);
+   		}
+   		else if (wres == -1) {
+   			if (errno == EINTR)
+   		     		continue;
+   		   	
+			printf("socket write failure \n");
+   		   	close(socket_fd);
+   		   	exit(EXIT_FAILURE);
+   		}
+		else if (wres != sizeof m){
+			printf("Write to server failed. Please try again. \n");
+			return;
+		}
+ 		break;
+	}
+
+	//read from server
+	while(1){
+    		ssize_t res = read(socket_fd, &m, sizeof m);
+    		if (res == 0) {
+    			printf("socket closed prematurely \n");
+    			close(socket_fd);
+    			exit(EXIT_FAILURE);
+    		}
+    		if (res == -1) {
+    			if (errno == EINTR)
+    				continue;
+    			printf("socket read failure \n");
+    			close(socket_fd);
+    			exit(EXIT_FAILURE);
+    		}
+	
+		if (m.type == SUCCESS){
+			printf("name: %s \n", m.rd.name);
+			printf("id: %u \n", m.rd.id);
+		}
+
+		else if (m.type == FAIL){
+			printf("Get failed. Please try again\n");
+		}
+
+		else
+			printf("Get read error. Please try again \n");
+		
+		break;
+	}
+}
+
+void put(int32_t socket_fd){
+	struct msg m;
+	m.type = PUT;
+
+	printf("Enter the name: ");
+
+	fgets(m.rd.name, MAX_NAME_LENGTH, stdin);
+	m.rd.name[strlen(m.rd.name) - 1] = '\0';
+	
+	printf("Enter the id: ");
+
+	char buf[MAX_ID_DIGITS + 2];	//+2 for '\n' and '\0'	
+	fgets(buf, MAX_ID_DIGITS + 2, stdin);
+
+	buf[strlen(buf) - 1] = '\0';
+	m.rd.id = atoi(buf);
+
+	printf("type: %u \n", m.type);
+	printf("name: %s \n", m.rd.name);
+	printf("id: %u \n", m.rd.id);
+
+	//write to server
+	while(1){
+		ssize_t wres = write(socket_fd, &m, sizeof m);
+
+		if (wres == 0) {
+   			printf("socket closed prematurely \n");
+   			close(socket_fd);
+   			exit(EXIT_FAILURE);
+   		}
+   		else if (wres == -1) {
+   			if (errno == EINTR)
+   		     		continue;
+   		   	
+			printf("socket write failure \n");
+   		   	close(socket_fd);
+   		   	exit(EXIT_FAILURE);
+   		}
+		else if (wres != sizeof m){
+			printf("Write to server failed. Please try again. \n");
+			return;
+		}
+		break;
+	}
+	
+	//read from server
+   	while(1){
+    		ssize_t res = read(socket_fd, &m, sizeof m);
+    		if (res == 0) {
+    			printf("socket closed prematurely \n");
+    			close(socket_fd);
+    			exit(EXIT_FAILURE);
+    		}
+    		if (res == -1) {
+    			if (errno == EINTR)
+    				continue;
+    			printf("socket read failure \n");
+    			close(socket_fd);
+    			exit(EXIT_FAILURE);
+    		}
+
+		if (m.type == SUCCESS)
+			printf("Put success. \n");
+
+		else if (m.type == FAIL)
+			printf("Put failed. Please try again \n");
+		
+		else
+			printf("Put read error. Please try again \n");
 
 		break;
 	}
-	return;
 }
 
 
