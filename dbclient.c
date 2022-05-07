@@ -75,8 +75,8 @@ main(int argc, char **argv) {
 			break;
 		}
 
-		else
-			printf("Invalid choice. Please try again\n");
+//		else
+//			printf("Invalid choice. Please try again\n");
 	}
 
   // Clean up.
@@ -120,6 +120,7 @@ void del(int32_t socket_fd){
 		}
  		break;
 	}
+	printf("\n");
 
 	//read from server
 	while(1){
@@ -151,6 +152,7 @@ void del(int32_t socket_fd){
 		
 		break;
 	}
+	printf("\n");
 }
 
 
@@ -190,6 +192,7 @@ void get(int32_t socket_fd){
 		}
  		break;
 	}
+	printf("\n");
 
 	//read from server
 	while(1){
@@ -221,6 +224,7 @@ void get(int32_t socket_fd){
 		
 		break;
 	}
+	printf("\n");
 }
 
 void put(int32_t socket_fd){
@@ -240,9 +244,9 @@ void put(int32_t socket_fd){
 	buf[strlen(buf) - 1] = '\0';
 	m.rd.id = atoi(buf);
 
-	printf("type: %u \n", m.type);
-	printf("name: %s \n", m.rd.name);
-	printf("id: %u \n", m.rd.id);
+//	printf("type: %u \n", m.type);
+//	printf("name: %s \n", m.rd.name);
+//	printf("id: %u \n", m.rd.id);
 
 	//write to server
 	while(1){
@@ -267,6 +271,7 @@ void put(int32_t socket_fd){
 		}
 		break;
 	}
+	printf("\n");
 	
 	//read from server
    	while(1){
@@ -295,6 +300,7 @@ void put(int32_t socket_fd){
 
 		break;
 	}
+	printf("\n");
 }
 
 

@@ -11,6 +11,8 @@
 #include <fcntl.h>	//open
 
 #include "msg.h"
+#include <assert.h>
+#include <pthread.h>
 
 #define MAX_ID_DIGITS 10
 
@@ -19,9 +21,12 @@ void PrintOut(int fd, struct sockaddr *addr, size_t addrlen);
 void PrintReverseDNS(struct sockaddr *addr, size_t addrlen);
 void PrintServerSide(int client_fd, int sock_family);
 int  Listen(char *portnum, int *sock_family);
-void HandleClient(int c_fd, struct sockaddr *addr, size_t addrlen,
-                  int sock_family, int32_t db_fd);
+void ClientPrintout(int c_fd, struct sockaddr *addr, size_t addrlen,
+                  int sock_family);
+void* HandleClient(void *c_fd);
 
+void Pthread_create(pthread_t *t, const pthread_attr_t *attr,
+			void *(*start_routine)(void *), void *arg);
 int put(int32_t db_fd, struct record rd);
 int get(int32_t db_fd, struct record *rd_ptr);
 int del(int32_t db_fd, struct record *rd_ptr);
@@ -41,12 +46,12 @@ main(int argc, char **argv) {
 		return EXIT_FAILURE;
 	}
 	
-	//create and open a new file called "database"
-	int32_t db_fd = open("database", O_RDWR|O_CREAT, S_IRUSR|S_IWUSR);
-	if (db_fd == -1){
-		perror("open failed");
-		exit(EXIT_FAILURE);
-	}
+//	//create and open a new file called "database"
+//	int32_t db_fd = open("database", O_RDWR|O_CREAT, S_IRUSR|S_IWUSR);
+//	if (db_fd == -1){
+//		perror("open failed");
+//		exit(EXIT_FAILURE);
+//	}
 
 	// Loop forever, accepting a connection from a client and doing
 	// an echo trick to it.
@@ -62,16 +67,33 @@ main(int argc, char **argv) {
 			printf("Failure on accept:%s \n ", strerror(errno));
 			break;
 		}
-		
-		HandleClient(client_fd,
+
+		ClientPrintout(client_fd,
 		             (struct sockaddr *)(&caddr),
 		             caddr_len,
-		             sock_family, db_fd);
+		             sock_family);
+
+		pthread_t p1;
+		
+		Pthread_create(&p1, NULL, HandleClient, &client_fd);
+
+
+//		HandleClient(client_fd,
+//		             (struct sockaddr *)(&caddr),
+//		             caddr_len,
+//		             sock_family, db_fd);
 	}
 	
 	// Close socket
 	close(listen_fd);
 	return EXIT_SUCCESS;
+}
+
+void Pthread_create(pthread_t *t, const pthread_attr_t *attr,
+			void *(*start_routine)(void *), void *arg){
+	int rc = pthread_create(t, attr, start_routine, arg);
+	assert(rc == 0);
+
 }
 
 void Usage(char *progname) {
@@ -239,13 +261,24 @@ Listen(char *portnum, int *sock_family) {
 }
 
 void 
-HandleClient(int c_fd, struct sockaddr *addr, size_t addrlen,
-                  int sock_family, int32_t db_fd) {
+ClientPrintout(int c_fd, struct sockaddr *addr, size_t addrlen,
+                  int sock_family) {
 	// Print out information about the client.
 	printf("\nNew client connection \n" );
 	PrintOut(c_fd, addr, addrlen);
 	PrintReverseDNS(addr, addrlen);
 	PrintServerSide(c_fd, sock_family);
+}
+
+void* HandleClient(void* arg){
+	int c_fd = *((int*) arg);
+
+	//create and open a new file called "database"
+	int32_t db_fd = open("database", O_RDWR|O_CREAT, S_IRUSR|S_IWUSR);
+	if (db_fd == -1){
+		perror("open failed");
+		exit(EXIT_FAILURE);
+	}
 	
 	// Loop, reading data and echo'ing it back, until the client
 	// closes the connection.
@@ -297,7 +330,7 @@ HandleClient(int c_fd, struct sockaddr *addr, size_t addrlen,
 			if (wres == 0){
 				printf("socket closed prematurely \n");
 				close(c_fd);
-				return;
+				return NULL;
 			}
 			else if (wres == -1){
 				if (errno == EINTR)
@@ -305,13 +338,14 @@ HandleClient(int c_fd, struct sockaddr *addr, size_t addrlen,
 
 				printf("socket write failure \n");
 				close(c_fd);
-				return;
+				return NULL;
 			}
 			break;
 		}
 	}
-
+	close(db_fd);
 	close(c_fd);
+	pthread_exit(NULL);
 }
 
 //delete a record from file
@@ -435,8 +469,5 @@ int put(int32_t db_fd, struct record rd){
 	if (write(db_fd, &rd, sizeof rd) != sizeof rd)
 		return -1;
 
-//	lseek(db_fd, 0, SEEK_END);	//move file offset to end of file
-//	if (write(db_fd, &rd, sizeof rd) != sizeof rd)
-//		return -1;
 	return 0;
 }
