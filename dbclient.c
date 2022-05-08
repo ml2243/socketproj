@@ -1,3 +1,6 @@
+//Huy Nguyen
+//hpn200000
+
 #include <arpa/inet.h>
 #include <assert.h>
 #include <errno.h>
@@ -57,6 +60,7 @@ main(int argc, char **argv) {
 
 	int8_t choice;
 
+	//menu
 	while(1){
 		printf("Enter your choice (1 to put, 2 to get, 3 to delete, 0 to quit): ");
 		scanf("%" SCNd8 "%*c", &choice);
@@ -75,8 +79,8 @@ main(int argc, char **argv) {
 			break;
 		}
 
-//		else
-//			printf("Invalid choice. Please try again\n");
+		else
+			printf("Invalid choice. Please try again\n");
 	}
 
   // Clean up.
@@ -84,6 +88,7 @@ main(int argc, char **argv) {
   return EXIT_SUCCESS;
 }
 
+//delete a record
 void del(int32_t socket_fd){
 	struct msg m;
 	m.type = DEL;
@@ -155,7 +160,7 @@ void del(int32_t socket_fd){
 	printf("\n");
 }
 
-
+//retrieve from record
 void get(int32_t socket_fd){
 	struct msg m;
 	m.type = GET;
@@ -227,6 +232,7 @@ void get(int32_t socket_fd){
 	printf("\n");
 }
 
+//add to record
 void put(int32_t socket_fd){
 	struct msg m;
 	m.type = PUT;
@@ -235,19 +241,20 @@ void put(int32_t socket_fd){
 
 	fgets(m.rd.name, MAX_NAME_LENGTH, stdin);
 	m.rd.name[strlen(m.rd.name) - 1] = '\0';
-	
-	printf("Enter the id: ");
 
-	char buf[MAX_ID_DIGITS + 2];	//+2 for '\n' and '\0'	
-	fgets(buf, MAX_ID_DIGITS + 2, stdin);
+	while(1){
+		printf("Enter the id: ");
 
-	buf[strlen(buf) - 1] = '\0';
-	m.rd.id = atoi(buf);
+		char buf[MAX_ID_DIGITS + 2];	//+2 for '\n' and '\0'	
+		fgets(buf, MAX_ID_DIGITS + 2, stdin);
 
-//	printf("type: %u \n", m.type);
-//	printf("name: %s \n", m.rd.name);
-//	printf("id: %u \n", m.rd.id);
-
+		buf[strlen(buf) - 1] = '\0';
+		m.rd.id = atoi(buf);
+		
+		if (m.rd.id != 0)
+			break;
+		printf("id cannot be 0. Please try again \n");
+	}
 	//write to server
 	while(1){
 		ssize_t wres = write(socket_fd, &m, sizeof m);

@@ -1,3 +1,6 @@
+//Huy Nguyen
+//hpn200000
+
 #include <arpa/inet.h>
 #include <assert.h>
 #include <errno.h>
@@ -46,13 +49,6 @@ main(int argc, char **argv) {
 		return EXIT_FAILURE;
 	}
 	
-//	//create and open a new file called "database"
-//	int32_t db_fd = open("database", O_RDWR|O_CREAT, S_IRUSR|S_IWUSR);
-//	if (db_fd == -1){
-//		perror("open failed");
-//		exit(EXIT_FAILURE);
-//	}
-
 	// Loop forever, accepting a connection from a client and doing
 	// an echo trick to it.
 	while (1) {
@@ -68,6 +64,7 @@ main(int argc, char **argv) {
 			break;
 		}
 
+		//printout connection info
 		ClientPrintout(client_fd,
 		             (struct sockaddr *)(&caddr),
 		             caddr_len,
@@ -76,12 +73,6 @@ main(int argc, char **argv) {
 		pthread_t p1;
 		
 		Pthread_create(&p1, NULL, HandleClient, &client_fd);
-
-
-//		HandleClient(client_fd,
-//		             (struct sockaddr *)(&caddr),
-//		             caddr_len,
-//		             sock_family, db_fd);
 	}
 	
 	// Close socket
@@ -89,6 +80,7 @@ main(int argc, char **argv) {
 	return EXIT_SUCCESS;
 }
 
+//create a thread
 void Pthread_create(pthread_t *t, const pthread_attr_t *attr,
 			void *(*start_routine)(void *), void *arg){
 	int rc = pthread_create(t, attr, start_routine, arg);
@@ -260,6 +252,7 @@ Listen(char *portnum, int *sock_family) {
   return listen_fd;
 }
 
+//printout client connection info
 void 
 ClientPrintout(int c_fd, struct sockaddr *addr, size_t addrlen,
                   int sock_family) {
@@ -270,6 +263,7 @@ ClientPrintout(int c_fd, struct sockaddr *addr, size_t addrlen,
 	PrintServerSide(c_fd, sock_family);
 }
 
+//processing a client
 void* HandleClient(void* arg){
 	int c_fd = *((int*) arg);
 
